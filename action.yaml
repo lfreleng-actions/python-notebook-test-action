@@ -2,38 +2,157 @@
 # SPDX-License-Identifier: Apache-2.0
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
-# actions-template
-name: "🛠️ Actions Template"
-description: "Description of action"
-# Any relevant notes/observations can go here
+# python-notebook-test-action
+name: "Verify Jupyter Notebooks"
+description: "Validates Jupyter Notebooks with pytest and nbmake"
+
+# Related documentation
+# https://github.com/treebeardtech/nbmake
 
 inputs:
-  INPUT:
-    description: "Description of input"
-    required: false
+  # Mandatory
+  PYTHON_VERSION:
+    description: "Python version used to run tests"
+    required: true
     type: string
-    default: "input"
-
-outputs:
-  OUTPUT:
-    description: "Description of output"
-    value: ${{ steps.code.outputs.output }}
+  # Optional
+  PERMIT_FAIL:
+    description: "Continue even when one or more tests fails"
+    required: false
+    type: boolean
+    default: false
+  PATH_PREFIX:
+    description: "Directory location containing Python project code"
+    type: string
+    required: false
+  PARALLEL_TESTS:
+    # Note: installs and uses pytest-xdist
+    description: "Parallel pytest/nbmake processes"
+    type: boolean
+    required: false
+    default: false
+  NBMAKE_KERNEL:
+    description: "Force nbmake to use a specific kernel"
+    type: string
+    required: false
+  INSTALL_KERNEL:
+    description: "Install custom kernel prior to testing"
+    type: string
+    required: false
 
 runs:
   using: "composite"
   steps:
-    - name: "Friendly Name"
-      id: code
+    - name: "Setup action/environment"
       shell: bash
       run: |
-        # Friendly Name
-        INPUT="${{ inputs.input }}"
-        if [ -z "$INPUT" ]; then
-          echo "Error: mandatory input INPUT was not set/configured ❌"
-          exit 1
+        # Setup action/environment
+        if [ -z "${{ inputs.python_version }}" ]; then
+          echo "Error: Python version was not provided ❌"; exit 1
+        else
+          echo "Using Python: ${{ inputs.python_version }} 🐍"
         fi
 
-        echo "output=$INPUT" >> "$GITHUB_ENV"
-        echo "output=$INPUT" >> "$GITHUB_OUTPUT"
-        echo "Action received a valid input: $INPUT ✅"
-        echo "Action received a valid input: $INPUT ✅" >> "$GITHUB_STEP_SUMMARY"
+        # Handle path_prefix input consistently and when absent
+        path_prefix="${{ inputs.PATH_PREFIX }}"
+        if [ -z "$path_prefix" ]; then
+          # Set current directory as path prefix
+          path_prefix="."
+        else
+          # Strip any trailing slash in provided path
+          path_prefix="${path_prefix%/}"
+        fi
+        # Verify is a valid directory path
+        if [ ! -d "$path_prefix" ]; then
+          echo "Error: invalid path/prefix to project directory ❌"; exit 1
+        fi
+        echo "path_prefix=$path_prefix" >> "$GITHUB_ENV"
+
+        if [ "f${{ inputs.PERMIT_FAIL }}" = "ftrue" ]; then
+          echo "Warning: test failures will be permitted ⚠️"
+        fi
+
+    - name: "Setup Python"
+      # yamllint disable-line rule:line-length
+      uses: actions/setup-python@8d9ed9ac5c53483de85588cdf95a591a75ab9f55 # v5.5.0
+      with:
+        python-version: ${{ inputs.python_version }}
+
+    - name: "Install notebook/test dependencies"
+      shell: bash
+      run: |
+        # Install notebook/test dependencies
+        echo "Installing: pytest, nbmake ⬇️"
+        # Note: pytest-xdist used for parallel testing
+        pip install --disable-pip-version-check -q \
+          pytest nbmake
+
+        echo "Install project and dependencies"
+        if [ -f ${{ env.path_prefix }}/pyproject.toml ]; then
+            echo "Source: ${{ env.path_prefix }}/pyproject.toml ⬇️"
+            pip install -q "${{ env.path_prefix }}/"
+        elif [ -f ${{ env.path_prefix }}/requirements.txt ]; then
+          echo "Source: ${{ env.path_prefix }}/requirements.txt ⬇️"
+          pip install -q -r "${{ env.path_prefix }}/requirements.txt"
+        else
+          # Jupyter Notebooks are not necessarily Python projects
+          echo "No Python dependencies to install ⚠️"
+        fi
+
+        # Set appropriate flags to nbmake
+        if [ -n "${{ inputs.nbmake_kernel }}" ]; then
+          echo "Forcing use of a custom kernel: ${{ inputs.nbmake_kernel }} 💬"
+          echo "kernel_flags=--nbmake-kernel=${{ inputs.nbmake_kernel }}" \
+            >> "$GITHUB_ENV"
+        fi
+        # Set flags for parallel testing
+        if [ "${{ inputs.parallel_tests }}" = 'true' ]; then
+          echo "flags=-n=auto" >> "$GITHUB_ENV"
+        fi
+
+    - name: "Install Pytest parallel test tool"
+      if: inputs.parallel_tests == 'true'
+      shell: bash
+      run: |
+        # Install parallel test tool
+        echo "Installing: pytest-xdist ⬇️"
+        pip install -q pytest-xdist
+
+    - name: "Error when kernel not specified but install requested"
+      if: inputs.install_kernel == 'true' && inputs.nbmake_kernel == ''
+      shell: bash
+      run: |
+        # Error when kernel not specified but install requested
+        echo "Error: kernel install requested but name NOT specified ❌"
+        exit 1
+
+    - name: "Install nbmake custom kernel"
+      if: inputs.install_kernel == 'true'
+      shell: bash
+      run: |
+        # Install parallel test tool
+        echo "Installing custom nbmake kernel: ${{ inputs.nbmake_kernel }} ⬇️"
+        python -m ipykernel install --user --name "${{ inputs.nbmake_kernel }}"
+
+    - name: "Build/test Jupyter Notebooks"
+      shell: bash
+      run: |
+        # Build/Test Jupyter Notebooks
+        echo "Searching repository for Jupyter Notebooks"
+        find "${{ env.path_prefix }}/" -name '*.ipynb'
+        if [ $? -eq 0 ]; then
+          if [ "f${{ inputs.permit_fail }}" = 'ftrue' ]; then
+            echo "Warning: flag set to permit test failures ⚠️"
+            pytest --nbmake \
+              ${{ env.kernel_flags }} \
+              ${{ env.flags }} \
+              ${{ env.path_prefix }}/**/*ipynb || true
+          else
+            pytest --nbmake \
+              ${{ env.kernel_flags }} \
+              ${{ env.flags }} \
+              ${{ env.path_prefix }}/**/*ipynb
+          fi
+        else
+          echo "Error: no Jupyter Notebooks were found ❌"; exit 1
+        fi
