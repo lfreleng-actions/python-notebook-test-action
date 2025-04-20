@@ -82,10 +82,10 @@ runs:
       shell: bash
       run: |
         # Install notebook/test dependencies
-        echo "Installing: pytest, nbmake ⬇️"
+        echo "Installing: pytest, pytest-cov, nbmake ⬇️"
         # Note: pytest-xdist used for parallel testing
         pip install --disable-pip-version-check -q \
-          pytest nbmake
+          pytest pytest-cov nbmake
 
         echo "Install project and dependencies"
         if [ -f ${{ env.path_prefix }}/pyproject.toml ]; then
