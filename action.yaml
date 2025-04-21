@@ -39,6 +39,11 @@ inputs:
     description: "Install custom kernel prior to testing"
     type: string
     required: false
+  PYTEST_FLAGS:
+    description: "Flags to send to the pytest command"
+    type: string
+    required: false
+    default: "--no-cov"
 
 runs:
   using: "composite"
@@ -82,10 +87,10 @@ runs:
       shell: bash
       run: |
         # Install notebook/test dependencies
-        echo "Installing: pytest, nbmake ⬇️"
+        echo "Installing: pytest, pytest-cov, nbmake ⬇️"
         # Note: pytest-xdist used for parallel testing
         pip install --disable-pip-version-check -q \
-          pytest nbmake
+          pytest pytest-cov nbmake
 
         echo "Install project and dependencies"
         if [ -f ${{ env.path_prefix }}/pyproject.toml ]; then
@@ -144,11 +149,13 @@ runs:
           if [ "f${{ inputs.permit_fail }}" = 'ftrue' ]; then
             echo "Warning: flag set to permit test failures ⚠️"
             pytest --nbmake \
+              ${{ inputs.pytest_flags }} \
               ${{ env.kernel_flags }} \
               ${{ env.flags }} \
               ${{ env.path_prefix }}/**/*ipynb || true
           else
             pytest --nbmake \
+              ${{ inputs.pytest_flags }} \
               ${{ env.kernel_flags }} \
               ${{ env.flags }} \
               ${{ env.path_prefix }}/**/*ipynb
