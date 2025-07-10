@@ -3,57 +3,57 @@
 # SPDX-FileCopyrightText: 2025 The Linux Foundation
 
 # python-notebook-test-action
-name: "Verify Jupyter Notebooks"
-description: "Validates Jupyter Notebooks with pytest and nbmake"
+name: 'Verify Jupyter Notebooks'
+description: 'Validates Jupyter Notebooks with pytest and nbmake'
 
 # Related documentation
 # https://github.com/treebeardtech/nbmake
 
 inputs:
   # Mandatory
-  PYTHON_VERSION:
-    description: "Python version used to run tests"
+  python_version:
+    description: 'Python version used to run tests'
     required: true
-    type: string
+    # type: string
   # Optional
-  PERMIT_FAIL:
-    description: "Continue even when one or more tests fails"
+  permit_fail:
+    description: 'Continue even when one or more tests fails'
     required: false
-    type: boolean
-    default: false
-  PATH_PREFIX:
-    description: "Directory location containing Python project code"
-    type: string
+    # type: boolean
+    default: 'false'
+  path_prefix:
+    description: 'Directory location containing Python project code'
+    # type: string
     required: false
-  PARALLEL_TESTS:
+  parallel_tests:
     # Note: installs and uses pytest-xdist
-    description: "Parallel pytest/nbmake processes"
-    type: boolean
+    description: 'Parallel pytest/nbmake processes'
+    # type: boolean
     required: false
-    default: false
-  NBMAKE_KERNEL:
-    description: "Force nbmake to use a specific kernel"
-    type: string
+    default: 'false'
+  nbmake_kernel:
+    description: 'Force nbmake to use a specific kernel'
+    # type: string
     required: false
-  INSTALL_KERNEL:
-    description: "Install custom kernel prior to testing"
-    type: string
+  install_kernel:
+    description: 'Install custom kernel prior to testing'
+    # type: string
     required: false
   PYTEST_FLAGS:
-    description: "Flags to send to the pytest command"
-    type: string
+    description: 'Flags to send to the pytest command'
+    # type: string
     required: false
-    default: "--no-cov"
+    default: '--no-cov'
 
 runs:
-  using: "composite"
+  using: 'composite'
   steps:
-    - name: "Setup action/environment"
+    - name: 'Setup action/environment'
       shell: bash
       run: |
         # Setup action/environment
         if [ -z "${{ inputs.python_version }}" ]; then
-          echo "Error: Python version was not provided ❌"; exit 1
+          echo 'Error: Python version was not provided ❌'; exit 1
         else
           echo "Using Python: ${{ inputs.python_version }} 🐍"
         fi
@@ -69,12 +69,12 @@ runs:
         fi
         # Verify is a valid directory path
         if [ ! -d "$path_prefix" ]; then
-          echo "Error: invalid path/prefix to project directory ❌"; exit 1
+          echo 'Error: invalid path/prefix to project directory ❌'; exit 1
         fi
         echo "path_prefix=$path_prefix" >> "$GITHUB_ENV"
 
         if [ "f${{ inputs.PERMIT_FAIL }}" = "ftrue" ]; then
-          echo "Warning: test failures will be permitted ⚠️"
+          echo 'Warning: test failures will be permitted ⚠️'
         fi
 
     - name: "Setup Python"
@@ -83,16 +83,34 @@ runs:
       with:
         python-version: ${{ inputs.python_version }}
 
-    - name: "Install notebook/test dependencies"
+    - name: 'Cache Python dependencies'
+      uses: actions/cache@5a3ec84eff668545956fd18022155c47e93e2684 # v4.0.2
+      with:
+        path: |
+          ~/.cache/pip
+          ~/.cache/pypoetry
+          ~/.cache/pipenv
+          .venv
+          .tox
+        # yamllint disable rule:line-length
+        key: >-
+          python-${{ runner.os }}-${{ inputs.python_version }}-
+          ${{ hashFiles('**/requirements*.txt', '**/pyproject.toml', '**/poetry.lock', '**/Pipfile*', '**/setup.py', '**/setup.cfg') }}
+        restore-keys: |
+          python-${{ runner.os }}-${{ inputs.python_version }}-
+          python-${{ runner.os }}-
+        # yamllint enable rule:line-length
+
+    - name: 'Install notebook/test dependencies'
       shell: bash
       run: |
         # Install notebook/test dependencies
-        echo "Installing: pytest, pytest-cov, nbmake ⬇️"
+        echo 'Installing: pytest, pytest-cov, nbmake ⬇️'
         # Note: pytest-xdist used for parallel testing
         pip install --disable-pip-version-check -q \
           pytest pytest-cov nbmake
 
-        echo "Install project and dependencies"
+        echo 'Install project and dependencies'
         if [ -f ${{ env.path_prefix }}/pyproject.toml ]; then
             echo "Source: ${{ env.path_prefix }}/pyproject.toml ⬇️"
             pip install -q "${{ env.path_prefix }}/"
@@ -101,7 +119,7 @@ runs:
           pip install -q -r "${{ env.path_prefix }}/requirements.txt"
         else
           # Jupyter Notebooks are not necessarily Python projects
-          echo "No Python dependencies to install ⚠️"
+          echo 'No Python dependencies to install ⚠️'
         fi
 
         # Set appropriate flags to nbmake
@@ -115,12 +133,12 @@ runs:
           echo "flags=-n=auto" >> "$GITHUB_ENV"
         fi
 
-    - name: "Install Pytest parallel test tool"
+    - name: 'Install Pytest parallel test tool'
       if: inputs.parallel_tests == 'true'
       shell: bash
       run: |
         # Install parallel test tool
-        echo "Installing: pytest-xdist ⬇️"
+        echo 'Installing: pytest-xdist ⬇️'
         pip install -q pytest-xdist
 
     - name: "Error when kernel not specified but install requested"
@@ -128,10 +146,10 @@ runs:
       shell: bash
       run: |
         # Error when kernel not specified but install requested
-        echo "Error: kernel install requested but name NOT specified ❌"
+        echo 'Error: kernel install requested but name NOT specified ❌'
         exit 1
 
-    - name: "Install nbmake custom kernel"
+    - name: 'Install nbmake custom kernel'
       if: inputs.install_kernel == 'true'
       shell: bash
       run: |
@@ -139,15 +157,15 @@ runs:
         echo "Installing custom nbmake kernel: ${{ inputs.nbmake_kernel }} ⬇️"
         python -m ipykernel install --user --name "${{ inputs.nbmake_kernel }}"
 
-    - name: "Build/test Jupyter Notebooks"
+    - name: 'Build/test Jupyter Notebooks'
       shell: bash
       run: |
         # Build/Test Jupyter Notebooks
-        echo "Searching repository for Jupyter Notebooks"
+        echo 'Searching repository for Jupyter Notebooks'
         find "${{ env.path_prefix }}/" -name '*.ipynb'
         if [ $? -eq 0 ]; then
           if [ "f${{ inputs.permit_fail }}" = 'ftrue' ]; then
-            echo "Warning: flag set to permit test failures ⚠️"
+            echo 'Warning: flag set to permit test failures ⚠️'
             pytest --nbmake \
               ${{ inputs.pytest_flags }} \
               ${{ env.kernel_flags }} \
@@ -161,5 +179,5 @@ runs:
               ${{ env.path_prefix }}/**/*ipynb
           fi
         else
-          echo "Error: no Jupyter Notebooks were found ❌"; exit 1
+          echo 'Error: no Jupyter Notebooks were found ❌'; exit 1
         fi
