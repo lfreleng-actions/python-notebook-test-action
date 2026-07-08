@@ -49,31 +49,43 @@ runs:
   using: 'composite'
   steps:
     - name: 'Setup action/environment'
+      id: setup
       shell: bash
+      env:
+        PYTHON_VERSION: "${{ inputs.python_version }}"
+        PATH_PREFIX: "${{ inputs.path_prefix }}"
+        PERMIT_FAIL: "${{ inputs.permit_fail }}"
       run: |
         # Setup action/environment
-        if [ -z "${{ inputs.python_version }}" ]; then
+        if [ -z "$PYTHON_VERSION" ]; then
           echo 'Error: Python version was not provided ❌'; exit 1
         else
-          echo "Using Python: ${{ inputs.python_version }} 🐍"
+          echo "Using Python: $PYTHON_VERSION 🐍"
         fi
 
         # Handle path_prefix input consistently and when absent
-        path_prefix="${{ inputs.PATH_PREFIX }}"
+        path_prefix="$PATH_PREFIX"
         if [ -z "$path_prefix" ]; then
           # Set current directory as path prefix
           path_prefix="."
         else
-          # Strip any trailing slash in provided path
+          # Strip any trailing slash in provided path
           path_prefix="${path_prefix%/}"
         fi
         # Verify is a valid directory path
         if [ ! -d "$path_prefix" ]; then
           echo 'Error: invalid path/prefix to project directory ❌'; exit 1
         fi
-        echo "path_prefix=$path_prefix" >> "$GITHUB_ENV"
+        # Use the heredoc output form with a unique delimiter to
+        # guard against output injection via crafted input values
+        delimiter="ghadelim_$$_${RANDOM}${RANDOM}${RANDOM}"
+        {
+          echo "path_prefix<<${delimiter}"
+          echo "$path_prefix"
+          echo "${delimiter}"
+        } >> "$GITHUB_OUTPUT"
 
-        if [ "f${{ inputs.PERMIT_FAIL }}" = "ftrue" ]; then
+        if [ "f$PERMIT_FAIL" = "ftrue" ]; then
           echo 'Warning: test failures will be permitted ⚠️'
         fi
 
@@ -84,7 +96,7 @@ runs:
         python-version: ${{ inputs.python_version }}
 
     - name: 'Cache Python dependencies'
-      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v4.0.2
+      uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6.1.0
       with:
         path: |
           ~/.cache/pip
@@ -102,7 +114,12 @@ runs:
         # yamllint enable rule:line-length
 
     - name: 'Install notebook/test dependencies'
+      id: flags
       shell: bash
+      env:
+        PATH_PREFIX: "${{ steps.setup.outputs.path_prefix }}"
+        NBMAKE_KERNEL: "${{ inputs.nbmake_kernel }}"
+        PARALLEL_TESTS: "${{ inputs.parallel_tests }}"
       run: |
         # Install notebook/test dependencies
         echo 'Installing: pytest, pytest-cov, nbmake ⬇️'
@@ -111,26 +128,32 @@ runs:
           pytest pytest-cov nbmake
 
         echo 'Install project and dependencies'
-        if [ -f ${{ env.path_prefix }}/pyproject.toml ]; then
-            echo "Source: ${{ env.path_prefix }}/pyproject.toml ⬇️"
-            pip install -q "${{ env.path_prefix }}/"
-        elif [ -f ${{ env.path_prefix }}/requirements.txt ]; then
-          echo "Source: ${{ env.path_prefix }}/requirements.txt ⬇️"
-          pip install -q -r "${{ env.path_prefix }}/requirements.txt"
+        if [ -f "$PATH_PREFIX/pyproject.toml" ]; then
+            echo "Source: $PATH_PREFIX/pyproject.toml ⬇️"
+            pip install -q "$PATH_PREFIX/"
+        elif [ -f "$PATH_PREFIX/requirements.txt" ]; then
+          echo "Source: $PATH_PREFIX/requirements.txt ⬇️"
+          pip install -q -r "$PATH_PREFIX/requirements.txt"
         else
-          # Jupyter Notebooks are not necessarily Python projects
+          # Jupyter Notebooks are not necessarily Python projects
           echo 'No Python dependencies to install ⚠️'
         fi
 
-        # Set appropriate flags to nbmake
-        if [ -n "${{ inputs.nbmake_kernel }}" ]; then
-          echo "Forcing use of a custom kernel: ${{ inputs.nbmake_kernel }} 💬"
-          echo "kernel_flags=--nbmake-kernel=${{ inputs.nbmake_kernel }}" \
-            >> "$GITHUB_ENV"
+        # Set appropriate flags to nbmake
+        if [ -n "$NBMAKE_KERNEL" ]; then
+          echo "Forcing use of a custom kernel: $NBMAKE_KERNEL 💬"
+          # Use the heredoc output form with a unique delimiter to
+          # guard against output injection via crafted input values
+          delimiter="ghadelim_$$_${RANDOM}${RANDOM}${RANDOM}"
+          {
+            echo "kernel_flags<<${delimiter}"
+            echo "--nbmake-kernel=$NBMAKE_KERNEL"
+            echo "${delimiter}"
+          } >> "$GITHUB_OUTPUT"
         fi
-        # Set flags for parallel testing
-        if [ "${{ inputs.parallel_tests }}" = 'true' ]; then
-          echo "flags=-n=auto" >> "$GITHUB_ENV"
+        # Set flags for parallel testing
+        if [ "$PARALLEL_TESTS" = 'true' ]; then
+          echo "flags=-n=auto" >> "$GITHUB_OUTPUT"
         fi
 
     - name: 'Install Pytest parallel test tool'
@@ -152,32 +175,43 @@ runs:
     - name: 'Install nbmake custom kernel'
       if: inputs.install_kernel == 'true'
       shell: bash
+      env:
+        NBMAKE_KERNEL: "${{ inputs.nbmake_kernel }}"
       run: |
-        # Install parallel test tool
-        echo "Installing custom nbmake kernel: ${{ inputs.nbmake_kernel }} ⬇️"
-        python -m ipykernel install --user --name "${{ inputs.nbmake_kernel }}"
+        # Install nbmake custom kernel
+        echo "Installing custom nbmake kernel: $NBMAKE_KERNEL ⬇️"
+        python -m ipykernel install --user --name "$NBMAKE_KERNEL"
 
     - name: 'Build/test Jupyter Notebooks'
       shell: bash
+      env:
+        PATH_PREFIX: "${{ steps.setup.outputs.path_prefix }}"
+        PERMIT_FAIL: "${{ inputs.permit_fail }}"
+        PYTEST_FLAGS: "${{ inputs.pytest_flags }}"
+        KERNEL_FLAGS: "${{ steps.flags.outputs.kernel_flags }}"
+        FLAGS: "${{ steps.flags.outputs.flags }}"
       run: |
         # Build/Test Jupyter Notebooks
         echo 'Searching repository for Jupyter Notebooks'
-        find "${{ env.path_prefix }}/" -name '*.ipynb'
-        if [ $? -eq 0 ]; then
-          if [ "f${{ inputs.permit_fail }}" = 'ftrue' ]; then
-            echo 'Warning: flag set to permit test failures ⚠️'
-            pytest --nbmake \
-              ${{ inputs.pytest_flags }} \
-              ${{ env.kernel_flags }} \
-              ${{ env.flags }} \
-              ${{ env.path_prefix }}/**/*ipynb || true
-          else
-            pytest --nbmake \
-              ${{ inputs.pytest_flags }} \
-              ${{ env.kernel_flags }} \
-              ${{ env.flags }} \
-              ${{ env.path_prefix }}/**/*ipynb
-          fi
-        else
+        mapfile -t notebooks < <(find "$PATH_PREFIX/" -name '*.ipynb')
+        if [ "${#notebooks[@]}" -eq 0 ]; then
           echo 'Error: no Jupyter Notebooks were found ❌'; exit 1
+        fi
+        printf '%s\n' "${notebooks[@]}"
+        # Word splitting of the flag variables below is intentional
+        if [ "f$PERMIT_FAIL" = 'ftrue' ]; then
+          echo 'Warning: flag set to permit test failures ⚠️'
+          # shellcheck disable=SC2086
+          pytest --nbmake \
+            $PYTEST_FLAGS \
+            $KERNEL_FLAGS \
+            $FLAGS \
+            "${notebooks[@]}" || true
+        else
+          # shellcheck disable=SC2086
+          pytest --nbmake \
+            $PYTEST_FLAGS \
+            $KERNEL_FLAGS \
+            $FLAGS \
+            "${notebooks[@]}"
         fi
