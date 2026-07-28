@@ -25,6 +25,7 @@ inputs:
     description: 'Directory location containing Python project code'
     # type: string
     required: false
+    default: '.'
   parallel_tests:
     # Note: installs and uses pytest-xdist
     description: 'Parallel pytest/nbmake processes'
