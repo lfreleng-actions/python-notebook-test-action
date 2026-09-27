@@ -36,11 +36,6 @@ jobs:
       contents: read
     timeout-minutes: 12
     steps:
-      - name: "Checkout repository"
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
       # Perform setup prior to running test(s)
       - name: "Checkout sample project repository"
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -50,20 +45,20 @@ jobs:
           path: "test-python-project"
 
       - name: "Run action: ${{ github.repository }}"
-        uses: ./
+        uses: $/
         with:
           python_version: "${{ env.python_version }}"
           path_prefix: "test-python-project/"
 
       - name: "Run action: ${{ github.repository }} [Parallel Tests]"
-        uses: ./
+        uses: $/
         with:
           python_version: "${{ env.python_version }}"
           path_prefix: "test-python-project/"
           parallel_tests: true
 
       - name: "Run action: ${{ github.repository }} [Install Custom Kernel]"
-        uses: ./
+        uses: $/
         id: install-fail
         continue-on-error: true
         with:
@@ -81,7 +76,7 @@ jobs:
           exit 1
 
       - name: "Run action: ${{ github.repository }} [Custom Kernel / Fail]"
-        uses: ./
+        uses: $/
         with:
           python_version: "${{ env.python_version }}"
           path_prefix: "test-python-project/"
