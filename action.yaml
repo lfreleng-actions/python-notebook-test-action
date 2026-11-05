@@ -91,6 +91,7 @@ runs:
         fi
 
     - name: "Setup Python"
+      id: setup-python
       # yamllint disable-line rule:line-length
       uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
       with:
@@ -114,6 +115,34 @@ runs:
           python-${{ runner.os }}-
         # yamllint enable rule:line-length
 
+    - name: 'Create isolated virtual environment'
+      id: venv
+      shell: bash
+      env:
+        BASE_PYTHON: "${{ steps.setup-python.outputs.python-path }}"
+      run: |
+        # Create isolated virtual environment
+        # Packages go here, not into the job's interpreter, so nothing
+        # this action installs leaks into later steps of the job
+        venv_dir="$RUNNER_TEMP/python-notebook-test-action/venv"
+        echo "Creating virtual environment: $venv_dir 🐍"
+        # Recreate on each run so state never carries over between calls
+        "$BASE_PYTHON" -m venv --clear "$venv_dir"
+        if [ -f "$venv_dir/bin/python" ]; then
+          venv_python="$venv_dir/bin/python"
+        else
+          venv_python="$venv_dir/Scripts/python.exe"
+        fi
+        delimiter="ghadelim_$$_${RANDOM}${RANDOM}${RANDOM}"
+        {
+          echo "dir<<${delimiter}"
+          echo "$venv_dir"
+          echo "${delimiter}"
+          echo "python<<${delimiter}"
+          echo "$venv_python"
+          echo "${delimiter}"
+        } >> "$GITHUB_OUTPUT"
+
     - name: 'Install notebook/test dependencies'
       id: flags
       shell: bash
@@ -121,20 +150,23 @@ runs:
         PATH_PREFIX: "${{ steps.setup.outputs.path_prefix }}"
         NBMAKE_KERNEL: "${{ inputs.nbmake_kernel }}"
         PARALLEL_TESTS: "${{ inputs.parallel_tests }}"
+        VENV_PYTHON: "${{ steps.venv.outputs.python }}"
       run: |
         # Install notebook/test dependencies
+        pip_install() {
+          "$VENV_PYTHON" -m pip install --disable-pip-version-check -q "$@"
+        }
         echo 'Installing: pytest, pytest-cov, nbmake ⬇️'
         # Note: pytest-xdist used for parallel testing
-        pip install --disable-pip-version-check -q \
-          pytest pytest-cov nbmake
+        pip_install pytest pytest-cov nbmake
 
         echo 'Install project and dependencies'
         if [ -f "$PATH_PREFIX/pyproject.toml" ]; then
             echo "Source: $PATH_PREFIX/pyproject.toml ⬇️"
-            pip install -q "$PATH_PREFIX/"
+            pip_install "$PATH_PREFIX/"
         elif [ -f "$PATH_PREFIX/requirements.txt" ]; then
           echo "Source: $PATH_PREFIX/requirements.txt ⬇️"
-          pip install -q -r "$PATH_PREFIX/requirements.txt"
+          pip_install -r "$PATH_PREFIX/requirements.txt"
         else
           # Jupyter Notebooks are not necessarily Python projects
           echo 'No Python dependencies to install ⚠️'
@@ -160,10 +192,13 @@ runs:
     - name: 'Install Pytest parallel test tool'
       if: inputs.parallel_tests == 'true'
       shell: bash
+      env:
+        VENV_PYTHON: "${{ steps.venv.outputs.python }}"
       run: |
         # Install parallel test tool
         echo 'Installing: pytest-xdist ⬇️'
-        pip install -q pytest-xdist
+        "$VENV_PYTHON" -m pip install --disable-pip-version-check -q \
+          pytest-xdist
 
     - name: "Error when kernel not specified but install requested"
       if: inputs.install_kernel == 'true' && inputs.nbmake_kernel == ''
@@ -178,10 +213,11 @@ runs:
       shell: bash
       env:
         NBMAKE_KERNEL: "${{ inputs.nbmake_kernel }}"
+        VENV_PYTHON: "${{ steps.venv.outputs.python }}"
       run: |
         # Install nbmake custom kernel
         echo "Installing custom nbmake kernel: $NBMAKE_KERNEL ⬇️"
-        python -m ipykernel install --user --name "$NBMAKE_KERNEL"
+        "$VENV_PYTHON" -m ipykernel install --user --name "$NBMAKE_KERNEL"
 
     - name: 'Build/test Jupyter Notebooks'
       shell: bash
@@ -191,8 +227,19 @@ runs:
         PYTEST_FLAGS: "${{ inputs.pytest_flags }}"
         KERNEL_FLAGS: "${{ steps.flags.outputs.kernel_flags }}"
         FLAGS: "${{ steps.flags.outputs.flags }}"
+        VENV_DIR: "${{ steps.venv.outputs.dir }}"
+        VENV_PYTHON: "${{ steps.venv.outputs.python }}"
       run: |
         # Build/Test Jupyter Notebooks
+        # Put the venv first on PATH for this step alone, so notebook
+        # subprocesses (python, pip, console scripts) use the venv too;
+        # GITHUB_PATH stays untouched and later steps see no change
+        venv_bin="$(dirname "$VENV_PYTHON")"
+        if command -v cygpath > /dev/null 2>&1; then
+          venv_bin="$(cygpath -u "$venv_bin")"
+        fi
+        export PATH="$venv_bin:$PATH"
+        export VIRTUAL_ENV="$VENV_DIR"
         echo 'Searching repository for Jupyter Notebooks'
         mapfile -t notebooks < <(find "$PATH_PREFIX/" -name '*.ipynb')
         if [ "${#notebooks[@]}" -eq 0 ]; then
@@ -203,14 +250,14 @@ runs:
         if [ "f$PERMIT_FAIL" = 'ftrue' ]; then
           echo 'Warning: flag set to permit test failures ⚠️'
           # shellcheck disable=SC2086
-          pytest --nbmake \
+          "$VENV_PYTHON" -m pytest --nbmake \
             $PYTEST_FLAGS \
             $KERNEL_FLAGS \
             $FLAGS \
             "${notebooks[@]}" || true
         else
           # shellcheck disable=SC2086
-          pytest --nbmake \
+          "$VENV_PYTHON" -m pytest --nbmake \
             $PYTEST_FLAGS \
             $KERNEL_FLAGS \
             $FLAGS \

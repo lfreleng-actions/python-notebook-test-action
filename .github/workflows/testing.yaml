@@ -82,3 +82,83 @@ jobs:
           path_prefix: "test-python-project/"
           nbmake_kernel: "test"
           install_kernel: true
+
+      - name: "Create notebook checking the PATH seen by notebooks"
+        shell: bash
+        run: |
+          # Notebook subprocesses must find the action's venv on PATH
+          mkdir -p path-check
+          python - <<'PYEOF'
+          import json
+
+          source = """\
+          import os
+          import shutil
+          import subprocess
+          import sys
+
+          venv_bin = os.path.dirname(sys.executable)
+          found = shutil.which("python")
+          assert found and os.path.samefile(os.path.dirname(found), venv_bin), (
+              f"python on PATH is {found}, expected one in {venv_bin}"
+          )
+          assert shutil.which("pytest"), "pytest console script not on PATH"
+          subprocess.run(["python", "-c", "import nbmake"], check=True)
+          """
+          notebook = {
+              "cells": [
+                  {
+                      "cell_type": "code",
+                      "execution_count": None,
+                      "metadata": {},
+                      "outputs": [],
+                      "source": source,
+                  }
+              ],
+              "metadata": {
+                  "kernelspec": {
+                      "display_name": "Python 3",
+                      "language": "python",
+                      "name": "python3",
+                  }
+              },
+              "nbformat": 4,
+              "nbformat_minor": 5,
+          }
+          with open("path-check/path_check.ipynb", "w") as f:
+              json.dump(notebook, f, indent=1)
+          PYEOF
+
+      - name: "Run action: ${{ github.repository }} [Notebook PATH]"
+        uses: $/
+        with:
+          python_version: "${{ env.python_version }}"
+          path_prefix: "path-check/"
+
+      - name: "Validate job interpreter left unchanged"
+        shell: bash
+        run: |
+          # Packages the action installs must stay out of the job's Python
+          python - <<'PYEOF'
+          import importlib.metadata as md
+          import importlib.util
+          import sys
+          import tomllib
+
+          with open("test-python-project/pyproject.toml", "rb") as f:
+              project = tomllib.load(f)["project"]["name"]
+
+          leaked = []
+          for dist in (project, "nbmake"):
+              try:
+                  md.distribution(dist)
+                  leaked.append(dist)
+              except md.PackageNotFoundError:
+                  pass
+          if importlib.util.find_spec("nbmake") is not None:
+              leaked.append("nbmake (importable)")
+          if leaked:
+              print(f"Error: found in {sys.executable}: {leaked} ❌")
+              sys.exit(1)
+          print(f"Job interpreter {sys.executable} is clean ✅")
+          PYEOF
