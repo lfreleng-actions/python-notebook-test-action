@@ -62,7 +62,17 @@ If this fails to locate any files, then the action will fail.
 
 Parallel tests can speed up execution when large/complex notebooks are present.
 
-Enabling INSTALL_KERNEL will invoke the following command before tests run:
+The action installs pytest, nbmake and the project under test into a
+virtual environment of its own, under
+`$RUNNER_TEMP/python-notebook-test-action/venv`, and runs the tests with
+that environment's interpreter. While the tests run, the environment's
+executable directory comes first on `PATH`, so `python`, `pip` and console
+scripts that notebooks call also resolve to it. The Python interpreter set
+up for the job, `PATH` and `VIRTUAL_ENV` stay unchanged for later steps, so
+they do not see those packages.
+
+Enabling INSTALL_KERNEL will invoke the following command, using the
+virtual environment's interpreter, before tests run:
 
 ```console
 python -m ipykernel install --user --name [NBMAKE_KERNEL]
